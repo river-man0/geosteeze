@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Node / test tooling
+node_modules/
+package-lock.json
+package.json
+
+# Local vendored Cesium / build/test scratch
+web/_vendor_test/
+web/_test_index.html
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

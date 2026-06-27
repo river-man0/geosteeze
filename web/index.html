@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>geosteeze — live geographic data on a globe</title>
+
+  <!-- Config first; runtime-config.js (optional) overrides it when served by serve.py -->
+  <script src="config.js"></script>
+  <script>
+    window.CESIUM_BASE_URL =
+      "https://unpkg.com/cesium@" + window.GEOSTEEZE.cesiumVersion + "/Build/Cesium/";
+  </script>
+  <script
+    src="https://unpkg.com/cesium@1.119/Build/Cesium/Cesium.js"
+    defer></script>
+  <link
+    href="https://unpkg.com/cesium@1.119/Build/Cesium/Widgets/widgets.css"
+    rel="stylesheet" />
+  <script src="runtime-config.js" defer onerror="/* absent when opened via file:// */"></script>
+  <link href="style.css" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header id="brand">
+        <h1>geo<span>steeze</span></h1>
+        <p class="tagline">live geographic data, streamed onto a globe</p>
+      </header>
+
+      <div id="controls">
+        <input id="search" type="search" placeholder="Search layers…" autocomplete="off" />
+        <div id="filters"><!-- category chips injected here --></div>
+        <label class="toggle">
+          <input type="checkbox" id="live-only" />
+          <span>Show validated (live) only</span>
+        </label>
+      </div>
+
+      <div id="catalog-meta"></div>
+      <ul id="catalog"><!-- layer rows injected here --></ul>
+    </aside>
+
+    <main id="map">
+      <div id="cesiumContainer"></div>
+
+      <section id="active-panel" class="hidden">
+        <header>
+          <h2>Active layers</h2>
+          <button id="clear-active" title="Remove all">clear</button>
+        </header>
+        <ul id="active-list"></ul>
+      </section>
+
+      <div id="toast" class="hidden"></div>
+    </main>
+  </div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
