@@ -12,7 +12,7 @@ catalog and drop any layer onto a 3D globe.
 ```
 ┌─────────────┐     discover + validate      ┌──────────────┐    fetch    ┌───────────┐
 │  catalogs   │ ───────────────────────────► │ catalog.json │ ──────────► │  Cesium   │
-│ ArcGIS/CKAN │     scraper/ (Python)        │  (web/)      │             │  globe    │
+│ ArcGIS/CKAN │     scraper/ (Python)        │  (docs/)     │             │  globe    │
 │  + seeds    │                              └──────────────┘             └───────────┘
 └─────────────┘
 ```
@@ -25,7 +25,7 @@ catalog and drop any layer onto a 3D globe.
 # 1. (optional) install the scraper's one dependency
 pip install -r requirements.txt
 
-# 2. A working catalog of curated seed endpoints already ships in web/catalog.json.
+# 2. A working catalog of curated seed endpoints already ships in docs/catalog.json.
 #    Serve the front-end and open the globe:
 python serve.py
 #    → http://localhost:8000
@@ -36,8 +36,23 @@ chips and search box to filter, the opacity sliders to blend overlays, and the
 ⊕ button to fly to a layer's extent.
 
 > **No Cesium Ion account needed.** The globe runs Ion-free with an
-> OpenStreetMap basemap by default. Add a free token in `web/config.js`
+> OpenStreetMap basemap by default. Add a free token in `docs/config.js`
 > (`cesiumIonToken`) to unlock world terrain and premium imagery.
+
+### Host it as a static site (GitHub Pages)
+
+The front-end is fully static, so you can publish `docs/` straight to GitHub
+Pages and open the globe from any browser (including your phone):
+
+1. Push this branch to GitHub.
+2. In the repo, go to **Settings → Pages**.
+3. Under **Build and deployment**, set **Source** to *Deploy from a branch*,
+   pick this branch, and choose the **`/docs`** folder. Save.
+4. Open `https://<owner>.github.io/<repo>/`.
+
+The seed catalog's feeds (USGS earthquakes, NWS alerts, NASA imagery, …) are
+CORS-enabled and stream in directly — no `serve.py` proxy needed. A
+`.nojekyll` file is included so Pages serves the folder as-is.
 
 ---
 
@@ -58,7 +73,7 @@ python -m scraper.scrape --sources seed arcgis_online ckan --drop-dead
 python -m scraper.scrape --sources seed --no-validate
 ```
 
-The result is written to `web/catalog.json`, which the front-end loads on
+The result is written to `docs/catalog.json`, which the front-end loads on
 refresh. Useful flags:
 
 | flag | meaning |
@@ -69,7 +84,7 @@ refresh. Useful flags:
 | `--per-topic N` | max ArcGIS Online results per topic query (default 30) |
 | `--ckan-rows N` | max CKAN datasets per resource format (default 200) |
 | `--max-layers N` | max layers extracted per WMS/WMTS service root (default 40) |
-| `--out PATH` | output path (default `web/catalog.json`) |
+| `--out PATH` | output path (default `docs/catalog.json`) |
 
 > **Note on network access:** the crawlers reach out to `www.arcgis.com`,
 > `catalog.data.gov`, and the individual services they discover. Run the
@@ -97,7 +112,7 @@ Each endpoint is validated with a check appropriate to its type — an ArcGIS
 content-type, or the first bytes of a GeoJSON response — recording whether it's
 live, its latency, and whether it sends permissive CORS headers.
 
-### Front-end (`web/`)
+### Front-end (`docs/`)
 
 A dependency-free single page (`index.html` + `app.js` + `style.css`) that loads
 Cesium from a CDN, fetches `catalog.json`, and maps each endpoint type to the
@@ -114,7 +129,7 @@ right Cesium provider:
 
 ### Local server + CORS proxy (`serve.py`)
 
-`serve.py` serves `web/` and, by default, exposes a `/proxy?url=…` endpoint.
+`serve.py` serves `docs/` and, by default, exposes a `/proxy?url=…` endpoint.
 Imagery (tiles, WMS `GetMap`) loads as `<img>` and isn't subject to CORS, but
 GeoJSON and ArcGIS feature queries are fetched with JavaScript and **are**. When
 served via `serve.py`, the front-end routes those fetches through the proxy so
@@ -124,7 +139,7 @@ guard; it is a development convenience, not a production gateway.
 
 ---
 
-## Configuration (`web/config.js`)
+## Configuration (`docs/config.js`)
 
 | key | default | purpose |
 |-----|---------|---------|

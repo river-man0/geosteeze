@@ -30,7 +30,7 @@ from .sources import SOURCES
 from .sources import ogc
 from .validate import validate_all
 
-DEFAULT_OUT = Path(__file__).resolve().parent.parent / "web" / "catalog.json"
+DEFAULT_OUT = Path(__file__).resolve().parent.parent / "docs" / "catalog.json"
 
 
 def collect(source_names: List[str], per_topic: int, ckan_rows: int) -> List[Endpoint]:

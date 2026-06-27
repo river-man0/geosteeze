@@ -26,7 +26,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
+WEB_DIR = Path(__file__).resolve().parent / "docs"
 USER_AGENT = "geosteeze-proxy/0.1"
 MAX_BYTES = 64 * 1024 * 1024  # 64 MiB safety cap
 
