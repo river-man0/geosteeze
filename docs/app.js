@@ -4,6 +4,7 @@
 
   const CFG = window.GEOSTEEZE;
   const MOBILE = "(max-width: 760px)";
+  const DEFAULT_OPACITY = 0.92;
   const CATEGORY_COLORS = {
     basemap: "#9aa7b4", imagery: "#5dade2", elevation: "#a47b5a",
     weather: "#48c9b0", hazards: "#e74c3c", environment: "#58d68d",
@@ -11,8 +12,9 @@
     "live-events": "#ec7063", other: "#7f8c8d",
   };
 
-  // active layer id -> { record, kind: "tile"|"vector", layer }
+  // active layer id -> { record, kind: "tile"|"vector", layer, opacity }
   const active = new Map();
+  const arcgisMeta = new Map(); // url -> { exportable, cached, mercator, wkid }
   let catalog = null;
   let map = null;
 
@@ -23,9 +25,11 @@
   function proxied(url) {
     return CFG.proxyUrl ? CFG.proxyUrl + encodeURIComponent(url) : url;
   }
-
   function colorFor(rec) {
     return CATEGORY_COLORS[rec.category] || CATEGORY_COLORS.other;
+  }
+  function isMercator(wkid) {
+    return [3857, 102100, 102113, 900913].includes(Number(wkid));
   }
 
   function toast(msg, isError) {
@@ -65,20 +69,19 @@
       maxZoom: 20,
     }).addTo(map);
 
-    // Keep Leaflet's internal size in sync with the responsive layout.
     window.addEventListener("resize", () => map.invalidateSize());
   }
 
   // --------------------------------------------------- raster layer builders
-  function buildTileLayer(rec) {
-    const opacity = 0.92;
+  // XYZ / WMS / WMTS only. ArcGIS services are handled by addArcGisLayer,
+  // which inspects service metadata to pick the right reprojection strategy.
+  function buildTileLayer(rec, opacity) {
     switch (rec.type) {
       case "XYZ":
         return L.tileLayer(rec.url, {
           opacity, maxZoom: 22, maxNativeZoom: 19,
           attribution: rec.attribution || "", crossOrigin: true,
         });
-
       case "WMS":
         return L.tileLayer.wms(rec.url, {
           layers: rec.layer || "",
@@ -88,21 +91,8 @@
           attribution: rec.attribution || "",
           crossOrigin: true,
         });
-
       case "WMTS":
         return buildWmtsLayer(rec, opacity);
-
-      case "ArcGISMapServer":
-        // dynamicMapLayer uses the export endpoint, so it works for both
-        // cached and dynamic MapServers regardless of tiling scheme.
-        return L.esri.dynamicMapLayer({
-          url: rec.url, opacity, attribution: rec.attribution || "",
-        });
-
-      case "ArcGISImageServer":
-        return L.esri.imageMapLayer({
-          url: rec.url, opacity, attribution: rec.attribution || "",
-        });
     }
     return null;
   }
@@ -148,6 +138,57 @@
     });
   }
 
+  // ---------------------------------------------------- ArcGIS reprojection
+  // A Leaflet map is single-CRS (EPSG:3857). ArcGIS can reproject server-side
+  // via the export endpoint, but cache-only ("TilesOnly") services cannot —
+  // those only align if their cache is already Web Mercator.
+  async function fetchArcGisMeta(url) {
+    if (arcgisMeta.has(url)) return arcgisMeta.get(url);
+    const sep = url.includes("?") ? "&" : "?";
+    const res = await fetch(proxied(url + sep + "f=json"), { cache: "force-cache" });
+    if (!res.ok) throw new Error(`service metadata HTTP ${res.status}`);
+    const d = await res.json();
+    const cap = d.capabilities || "";
+    const tileInfo = d.tileInfo;
+    const sr = (tileInfo && tileInfo.spatialReference) || d.spatialReference || {};
+    const wkid = sr.latestWkid || sr.wkid || null;
+    const tilesOnly = /TilesOnly/i.test(cap);
+    const meta = {
+      cached: !!d.singleFusedMapCache || !!tileInfo,
+      exportable: !tilesOnly && /(^|,)\s*(Map|Image)\s*(,|$)/i.test(cap),
+      mercator: isMercator(wkid),
+      wkid,
+    };
+    arcgisMeta.set(url, meta);
+    return meta;
+  }
+
+  async function addArcGisLayer(rec) {
+    const opacity = DEFAULT_OPACITY;
+    const attribution = rec.attribution || "";
+    const isImage = rec.type === "ArcGISImageServer";
+    const meta = await fetchArcGisMeta(rec.url);
+
+    let layer;
+    if (meta.exportable) {
+      // Server reprojects the export image into the map's CRS — works for any
+      // source projection.
+      layer = isImage
+        ? L.esri.imageMapLayer({ url: rec.url, opacity, attribution })
+        : L.esri.dynamicMapLayer({ url: rec.url, opacity, attribution });
+    } else if (meta.cached && meta.mercator) {
+      // Pre-rendered Web Mercator tiles align directly.
+      layer = L.esri.tiledMapLayer({ url: rec.url, opacity, attribution });
+    } else {
+      throw new Error(
+        `tile-only cache in EPSG:${meta.wkid || "?"} can't be reprojected on a 2D map`
+      );
+    }
+    layer.addTo(map);
+    active.set(rec.id, { record: rec, kind: "tile", layer, opacity });
+    if (rec.bbox) flyToBbox(rec.bbox);
+  }
+
   // ----------------------------------------------------- vector layer helpers
   function pointStyle(color) {
     return {
@@ -170,33 +211,34 @@
     );
   }
 
-  // ------------------------------------------------------------- add / remove
+  // ------------------------------------------------------------- toggle / add
+  function toggleLayer(rec) {
+    if (active.has(rec.id)) removeLayer(rec.id);
+    else addLayer(rec);
+  }
+
   async function addLayer(rec) {
-    if (active.has(rec.id)) {
-      flyToActive(rec.id);
-      closeSidebarMobile();
-      return;
-    }
     toast(`Loading “${rec.title}” …`);
     try {
       if (rec.type === "GeoJSON") await addGeoJson(rec);
       else if (rec.type === "ArcGISFeatureServer") addFeatureLayer(rec);
+      else if (rec.type === "ArcGISMapServer" || rec.type === "ArcGISImageServer") await addArcGisLayer(rec);
       else addRaster(rec);
-      markAdded(rec.id, true);
-      renderActive();
+      updateRow(rec.id);
       toast(`Added “${rec.title}”.`);
-      closeSidebarMobile();
     } catch (err) {
       console.error(err);
+      active.delete(rec.id);
+      updateRow(rec.id);
       toast(`Could not load “${rec.title}”: ${err.message || err}`, true);
     }
   }
 
   function addRaster(rec) {
-    const layer = buildTileLayer(rec);
+    const layer = buildTileLayer(rec, DEFAULT_OPACITY);
     if (!layer) throw new Error("unsupported layer type: " + rec.type);
     layer.addTo(map);
-    active.set(rec.id, { record: rec, kind: "tile", layer });
+    active.set(rec.id, { record: rec, kind: "tile", layer, opacity: DEFAULT_OPACITY });
     if (rec.bbox) flyToBbox(rec.bbox);
   }
 
@@ -212,7 +254,7 @@
       toast(`“${rec.title}”: feature request failed (${e.message || "error"})`, true)
     );
     layer.addTo(map);
-    active.set(rec.id, { record: rec, kind: "vector", layer });
+    active.set(rec.id, { record: rec, kind: "vector", layer, opacity: 1 });
     if (rec.bbox) flyToBbox(rec.bbox);
   }
 
@@ -226,7 +268,7 @@
       style: () => vectorStyle(color),
       onEachFeature: bindPopup,
     }).addTo(map);
-    active.set(rec.id, { record: rec, kind: "vector", layer });
+    active.set(rec.id, { record: rec, kind: "vector", layer, opacity: 1 });
     try {
       map.flyToBounds(layer.getBounds(), { maxZoom: 8, duration: 1.2, padding: [24, 24] });
     } catch (_) {
@@ -239,8 +281,7 @@
     if (!entry) return;
     map.removeLayer(entry.layer);
     active.delete(id);
-    markAdded(id, false);
-    renderActive();
+    updateRow(id);
   }
 
   function flyToActive(id) {
@@ -256,6 +297,7 @@
   function setOpacity(id, value) {
     const entry = active.get(id);
     if (!entry) return;
+    entry.opacity = value;
     if (entry.kind === "tile") {
       entry.layer.setOpacity(value);
     } else if (entry.layer.setStyle) {
@@ -267,6 +309,58 @@
   function dotClass(rec) {
     if (rec.checked_at == null) return "unknown";
     return rec.live ? "live" : "dead";
+  }
+
+  // Builds the inner HTML of a single catalog row, including the inline
+  // opacity slider when the layer is currently active.
+  function rowHtml(rec) {
+    const entry = active.get(rec.id);
+    const dotTitle = rec.live ? "validated live" : rec.checked_at ? "failed last check" : "not yet validated";
+    let controls = "";
+    if (entry) {
+      controls = `
+        <div class="layer-controls">
+          <input type="range" class="opacity" min="0" max="1" step="0.05" value="${entry.opacity}" aria-label="Layer opacity" />
+          <button type="button" class="zoom-btn" title="Zoom to layer">⊕</button>
+        </div>`;
+    }
+    return `
+      <div class="row-main">
+        <div class="row1">
+          <span class="dot ${dotClass(rec)}" title="${dotTitle}"></span>
+          <span class="title">${escapeHtml(rec.title)}</span>
+          <span class="check" aria-hidden="true">${entry ? "✓" : ""}</span>
+        </div>
+        ${rec.description ? `<div class="desc">${escapeHtml(rec.description)}</div>` : ""}
+        <div class="meta">
+          <span class="badge type">${rec.type}</span>
+          <span class="badge">${rec.category}</span>
+          ${rec.cors === false ? '<span class="badge" title="server may block browser fetches">no-CORS</span>' : ""}
+          ${rec.latency_ms != null ? `<span class="badge">${rec.latency_ms} ms</span>` : ""}
+        </div>
+      </div>${controls}`;
+  }
+
+  function wireRow(li, rec) {
+    li.querySelector(".row-main").addEventListener("click", () => toggleLayer(rec));
+    const slider = li.querySelector(".opacity");
+    if (slider) {
+      slider.addEventListener("input", (e) => setOpacity(rec.id, parseFloat(e.target.value)));
+      slider.addEventListener("click", (e) => e.stopPropagation());
+    }
+    const zoom = li.querySelector(".zoom-btn");
+    if (zoom) {
+      zoom.addEventListener("click", (e) => { e.stopPropagation(); flyToActive(rec.id); });
+    }
+  }
+
+  function updateRow(id) {
+    const li = document.querySelector(`.layer[data-id="${id}"]`);
+    if (!li) return;
+    const rec = catalog.endpoints.find((r) => r.id === id);
+    li.classList.toggle("added", active.has(id));
+    li.innerHTML = rowHtml(rec);
+    wireRow(li, rec);
   }
 
   function renderCatalog() {
@@ -294,26 +388,10 @@
       const li = document.createElement("li");
       li.className = "layer" + (active.has(rec.id) ? " added" : "");
       li.dataset.id = rec.id;
-      li.innerHTML = `
-        <div class="row1">
-          <span class="dot ${dotClass(rec)}" title="${rec.live ? "validated live" : rec.checked_at ? "failed last check" : "not yet validated"}"></span>
-          <span class="title">${escapeHtml(rec.title)}</span>
-        </div>
-        ${rec.description ? `<div class="desc">${escapeHtml(rec.description)}</div>` : ""}
-        <div class="meta">
-          <span class="badge type">${rec.type}</span>
-          <span class="badge">${rec.category}</span>
-          ${rec.cors === false ? '<span class="badge" title="server may block browser fetches">no-CORS</span>' : ""}
-          ${rec.latency_ms != null ? `<span class="badge">${rec.latency_ms} ms</span>` : ""}
-        </div>`;
-      li.addEventListener("click", () => addLayer(rec));
+      li.innerHTML = rowHtml(rec);
+      wireRow(li, rec);
       ul.appendChild(li);
     }
-  }
-
-  function markAdded(id, added) {
-    const li = document.querySelector(`.layer[data-id="${id}"]`);
-    if (li) li.classList.toggle("added", added);
   }
 
   // ------------------------------------------------------------- UI: filters
@@ -340,40 +418,13 @@
     );
   }
 
-  // ------------------------------------------------------- UI: active panel
-  function renderActive() {
-    const panel = $("#active-panel");
-    const list = $("#active-list");
-    panel.classList.toggle("hidden", active.size === 0);
-    list.innerHTML = "";
-    for (const [id, entry] of active) {
-      const rec = entry.record;
-      const li = document.createElement("li");
-      li.className = "active-item";
-      li.innerHTML = `
-        <div class="ai-top">
-          <span class="dot ${dotClass(rec)}"></span>
-          <span class="ai-title" title="${escapeHtml(rec.title)}">${escapeHtml(rec.title)}</span>
-          <button data-act="fly" title="Zoom to layer">⊕</button>
-          <button data-act="remove" title="Remove">✕</button>
-        </div>
-        <input type="range" min="0" max="1" step="0.05" value="0.92" />`;
-      li.querySelector('[data-act="remove"]').addEventListener("click", () => removeLayer(id));
-      li.querySelector('[data-act="fly"]').addEventListener("click", () => flyToActive(id));
-      li.querySelector("input").addEventListener("input", (e) =>
-        setOpacity(id, parseFloat(e.target.value))
-      );
-      list.appendChild(li);
-    }
-  }
-
   function escapeHtml(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
     );
   }
 
-  // ----------------------------------------------------- UI: responsive drawer
+  // ----------------------------------------------------- UI: responsive sheet
   function toggleSidebar(force) {
     const sb = $("#sidebar");
     const open = force != null ? force : !sb.classList.contains("open");
@@ -381,16 +432,10 @@
     $("#backdrop").classList.toggle("show", open);
     $("#menu-toggle").setAttribute("aria-expanded", String(open));
   }
-  function closeSidebarMobile() {
-    if (isMobile()) toggleSidebar(false);
-  }
 
   function wireUi() {
     $("#search").addEventListener("input", renderCatalog);
     $("#live-only").addEventListener("change", renderCatalog);
-    $("#clear-active").addEventListener("click", () => {
-      [...active.keys()].forEach(removeLayer);
-    });
     $("#menu-toggle").addEventListener("click", () => toggleSidebar());
     $("#sidebar-close").addEventListener("click", () => toggleSidebar(false));
     $("#backdrop").addEventListener("click", () => toggleSidebar(false));
@@ -421,7 +466,6 @@
 
   function boot() {
     if (typeof L === "undefined" || !L.esri) {
-      // Leaflet / esri-leaflet (deferred) not ready yet; retry shortly.
       return setTimeout(boot, 60);
     }
     main();

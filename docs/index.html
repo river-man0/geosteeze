@@ -37,10 +37,11 @@
     <div id="backdrop"></div>
 
     <aside id="sidebar">
+      <div id="sheet-grab" aria-hidden="true"></div>
       <header id="brand">
         <h1>geo<span>steeze</span></h1>
         <button id="sidebar-close" aria-label="Close layer list">✕</button>
-        <p class="tagline">live geographic data, streamed onto a map</p>
+        <p class="tagline">tap a layer to show it · tap again to hide</p>
       </header>
 
       <div id="controls">
@@ -58,15 +59,6 @@
 
     <main id="map-wrap">
       <div id="map"></div>
-
-      <section id="active-panel" class="hidden">
-        <header>
-          <h2>Active layers</h2>
-          <button id="clear-active" title="Remove all">clear</button>
-        </header>
-        <ul id="active-list"></ul>
-      </section>
-
       <div id="toast" class="hidden"></div>
     </main>
   </div>
