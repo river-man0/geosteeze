@@ -1,8 +1,9 @@
-/* geosteeze — explore live geographic data endpoints on a Cesium globe. */
+/* geosteeze — explore live geographic data endpoints on a Leaflet web map. */
 (function () {
   "use strict";
 
   const CFG = window.GEOSTEEZE;
+  const MOBILE = "(max-width: 760px)";
   const CATEGORY_COLORS = {
     basemap: "#9aa7b4", imagery: "#5dade2", elevation: "#a47b5a",
     weather: "#48c9b0", hazards: "#e74c3c", environment: "#58d68d",
@@ -10,16 +11,21 @@
     "live-events": "#ec7063", other: "#7f8c8d",
   };
 
-  // active layer id -> { record, handle, type, layer? , dataSource? }
+  // active layer id -> { record, kind: "tile"|"vector", layer }
   const active = new Map();
   let catalog = null;
-  let viewer = null;
+  let map = null;
 
   // ----------------------------------------------------------------- helpers
   const $ = (sel) => document.querySelector(sel);
+  const isMobile = () => window.matchMedia(MOBILE).matches;
 
   function proxied(url) {
     return CFG.proxyUrl ? CFG.proxyUrl + encodeURIComponent(url) : url;
+  }
+
+  function colorFor(rec) {
+    return CATEGORY_COLORS[rec.category] || CATEGORY_COLORS.other;
   }
 
   function toast(msg, isError) {
@@ -31,166 +37,198 @@
     toast._t = setTimeout(() => el.classList.add("hidden"), isError ? 6000 : 3500);
   }
 
-  function rectFromBbox(bbox) {
-    if (!bbox || bbox.length !== 4) return null;
+  function flyToBbox(bbox) {
+    if (!bbox || bbox.length !== 4) return;
     let [w, s, e, n] = bbox;
     w = Math.max(-180, w); e = Math.min(180, e);
-    s = Math.max(-89, s); n = Math.min(89, n);
-    if (e <= w || n <= s) return null;
-    return Cesium.Rectangle.fromDegrees(w, s, e, n);
-  }
-
-  function flyToBbox(bbox) {
-    const rect = rectFromBbox(bbox);
-    if (rect) viewer.camera.flyTo({ destination: rect, duration: 1.2 });
+    s = Math.max(-85, s); n = Math.min(85, n);
+    if (e <= w || n <= s) return;
+    map.flyToBounds([[s, w], [n, e]], { maxZoom: 9, duration: 1.0, padding: [24, 24] });
   }
 
   // ------------------------------------------------------------- map set-up
-  function initViewer() {
-    if (CFG.cesiumIonToken) Cesium.Ion.defaultAccessToken = CFG.cesiumIonToken;
-    else Cesium.Ion.defaultAccessToken = undefined;
-
-    const osm = new Cesium.UrlTemplateImageryProvider({
-      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-      maximumLevel: 19,
-      credit: "© OpenStreetMap contributors",
+  function initMap() {
+    map = L.map("map", {
+      center: [20, 0],
+      zoom: 2,
+      minZoom: 2,
+      worldCopyJump: true,
+      zoomControl: false,
+      attributionControl: true,
     });
+    L.control.zoom({ position: "topright" }).addTo(map);
+    L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
 
-    viewer = new Cesium.Viewer("cesiumContainer", {
-      baseLayer: new Cesium.ImageryLayer(osm),
-      baseLayerPicker: false,
-      geocoder: false,
-      homeButton: true,
-      sceneModePicker: true,
-      navigationHelpButton: false,
-      animation: false,
-      timeline: false,
-      fullscreenButton: true,
-      infoBox: true,
-      selectionIndicator: true,
-    });
-    viewer.scene.globe.enableLighting = false;
-    viewer.cesiumWidget.creditContainer.style.fontSize = "11px";
+    L.tileLayer(CFG.basemapUrl, {
+      subdomains: CFG.basemapSubdomains || "abc",
+      attribution: CFG.basemapAttribution || "",
+      maxZoom: 20,
+    }).addTo(map);
+
+    // Keep Leaflet's internal size in sync with the responsive layout.
+    window.addEventListener("resize", () => map.invalidateSize());
   }
 
-  // ------------------------------------------------- imagery provider builders
-  function buildImageryProvider(rec) {
+  // --------------------------------------------------- raster layer builders
+  function buildTileLayer(rec) {
+    const opacity = 0.92;
     switch (rec.type) {
       case "XYZ":
-        return new Cesium.UrlTemplateImageryProvider({
-          url: rec.url,
-          maximumLevel: 19,
-          credit: rec.attribution || "",
+        return L.tileLayer(rec.url, {
+          opacity, maxZoom: 22, maxNativeZoom: 19,
+          attribution: rec.attribution || "", crossOrigin: true,
         });
 
       case "WMS":
-        return new Cesium.WebMapServiceImageryProvider({
-          url: rec.url,
-          layers: rec.layer,
-          parameters: { transparent: true, format: "image/png" },
-          credit: rec.attribution || "",
+        return L.tileLayer.wms(rec.url, {
+          layers: rec.layer || "",
+          format: rec.tile_format || "image/png",
+          transparent: true,
+          opacity,
+          attribution: rec.attribution || "",
+          crossOrigin: true,
         });
 
-      case "WMTS": {
-        const opts = {
-          url: rec.url,
-          layer: rec.layer,
-          style: rec.style || "default",
-          format: rec.tile_format || "image/png",
-          tileMatrixSetID: rec.tile_matrix_set,
-          credit: rec.attribution || "",
-        };
-        if (rec.tiling_scheme === "geographic") {
-          opts.tilingScheme = new Cesium.GeographicTilingScheme();
-        }
-        if (rec.time_dimension) {
-          opts.dimensions = { Time: CFG.defaultDate };
-        }
-        return new Cesium.WebMapTileServiceImageryProvider(opts);
-      }
+      case "WMTS":
+        return buildWmtsLayer(rec, opacity);
+
+      case "ArcGISMapServer":
+        // dynamicMapLayer uses the export endpoint, so it works for both
+        // cached and dynamic MapServers regardless of tiling scheme.
+        return L.esri.dynamicMapLayer({
+          url: rec.url, opacity, attribution: rec.attribution || "",
+        });
 
       case "ArcGISImageServer":
-      case "ArcGISMapServer":
-        // fromUrl is async; return the promise and resolve in addLayer.
-        return Cesium.ArcGisMapServerImageryProvider.fromUrl(rec.url);
+        return L.esri.imageMapLayer({
+          url: rec.url, opacity, attribution: rec.attribution || "",
+        });
     }
     return null;
   }
 
-  // ----------------------------------------------------- GeoJSON styling
-  function styleGeoJson(ds, rec) {
-    const color = Cesium.Color.fromCssColorString(
-      CATEGORY_COLORS[rec.category] || CATEGORY_COLORS.other
-    );
-    ds.entities.values.forEach((ent) => {
-      if (ent.billboard) {
-        ent.billboard = undefined;
-        ent.point = new Cesium.PointGraphics({
-          color: color,
-          pixelSize: 9,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 1.5,
-        });
-      }
-      if (ent.polygon) {
-        ent.polygon.material = color.withAlpha(0.45);
-        ent.polygon.outline = true;
-        ent.polygon.outlineColor = color;
-      }
-      if (ent.polyline) {
-        ent.polyline.material = color;
-        ent.polyline.width = 2;
-      }
+  // WMTS in a web-mercator map. NASA GIBS publishes a mercator REST endpoint
+  // that aligns with Leaflet; everything else falls back to a KVP GetTile URL.
+  function buildWmtsLayer(rec, opacity) {
+    let host = "";
+    try { host = new URL(rec.url).host; } catch (_) { /* relative */ }
+    const ext = /jpe?g/i.test(rec.tile_format || "") ? "jpg" : "png";
+
+    if (host.endsWith("gibs.earthdata.nasa.gov") && rec.tiling_scheme === "geographic") {
+      const levels = {
+        "15.625m": 13, "31.25m": 12, "62.5m": 11, "125m": 10,
+        "250m": 9, "500m": 8, "1km": 7, "2km": 6,
+      };
+      const level = levels[rec.tile_matrix_set] || 8;
+      const tms = "GoogleMapsCompatible_Level" + level;
+      const time = rec.time_dimension ? "/" + (CFG.defaultDate || "default") : "";
+      const url =
+        `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${rec.layer}` +
+        `/default${time}/${tms}/{z}/{y}/{x}.${ext}`;
+      return L.tileLayer(url, {
+        opacity, maxNativeZoom: level, maxZoom: 22,
+        attribution: rec.attribution || "NASA GIBS", crossOrigin: true,
+      });
+    }
+
+    const sep = rec.url.includes("?") ? "&" : "?";
+    const params = [
+      "SERVICE=WMTS", "REQUEST=GetTile", "VERSION=1.0.0",
+      "LAYER=" + encodeURIComponent(rec.layer || ""),
+      "STYLE=" + encodeURIComponent(rec.style || "default"),
+      "TILEMATRIXSET=" + encodeURIComponent(rec.tile_matrix_set || ""),
+      "FORMAT=" + encodeURIComponent(rec.tile_format || "image/png"),
+      "TILEMATRIX={z}", "TILEROW={y}", "TILECOL={x}",
+    ];
+    if (rec.time_dimension && CFG.defaultDate) {
+      params.push("TIME=" + encodeURIComponent(CFG.defaultDate));
+    }
+    return L.tileLayer(rec.url + sep + params.join("&"), {
+      opacity, maxZoom: 22, attribution: rec.attribution || "", crossOrigin: true,
     });
+  }
+
+  // ----------------------------------------------------- vector layer helpers
+  function pointStyle(color) {
+    return {
+      radius: 6, color: "#ffffff", weight: 1.4,
+      fillColor: color, fillOpacity: 0.9, opacity: 1,
+    };
+  }
+  function vectorStyle(color) {
+    return { color, weight: 2, opacity: 1, fillColor: color, fillOpacity: 0.45 };
+  }
+  function bindPopup(feature, layer) {
+    const p = feature.properties || {};
+    const name = p.title || p.name || p.NAME || p.headline || p.event || p.place || "";
+    const rows = Object.keys(p).slice(0, 8)
+      .map((k) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(p[k])}</td></tr>`)
+      .join("");
+    layer.bindPopup(
+      (name ? `<strong>${escapeHtml(name)}</strong>` : "") +
+      (rows ? `<table class="popup">${rows}</table>` : "(no attributes)")
+    );
   }
 
   // ------------------------------------------------------------- add / remove
   async function addLayer(rec) {
     if (active.has(rec.id)) {
       flyToActive(rec.id);
+      closeSidebarMobile();
       return;
     }
     toast(`Loading “${rec.title}” …`);
     try {
-      if (rec.type === "GeoJSON" || rec.type === "ArcGISFeatureServer") {
-        await addVector(rec);
-      } else {
-        await addImagery(rec);
-      }
+      if (rec.type === "GeoJSON") await addGeoJson(rec);
+      else if (rec.type === "ArcGISFeatureServer") addFeatureLayer(rec);
+      else addRaster(rec);
       markAdded(rec.id, true);
       renderActive();
       toast(`Added “${rec.title}”.`);
+      closeSidebarMobile();
     } catch (err) {
       console.error(err);
       toast(`Could not load “${rec.title}”: ${err.message || err}`, true);
     }
   }
 
-  async function addImagery(rec) {
-    let provider = buildImageryProvider(rec);
-    if (!provider) throw new Error("unsupported imagery type");
-    if (provider.then) provider = await provider; // ArcGIS fromUrl()
-    const layer = viewer.imageryLayers.addImageryProvider(provider);
-    layer.alpha = rec.type === "basemap" ? 1.0 : 0.92;
-    active.set(rec.id, { record: rec, type: "imagery", layer });
+  function addRaster(rec) {
+    const layer = buildTileLayer(rec);
+    if (!layer) throw new Error("unsupported layer type: " + rec.type);
+    layer.addTo(map);
+    active.set(rec.id, { record: rec, kind: "tile", layer });
     if (rec.bbox) flyToBbox(rec.bbox);
   }
 
-  async function addVector(rec) {
-    let url = rec.url;
-    if (rec.type === "ArcGISFeatureServer") {
-      const base = rec.url.replace(/\/+$/, "");
-      url = `${base}/query?where=1%3D1&outFields=*&outSR=4326&f=geojson&resultRecordCount=4000`;
-    }
-    const ds = await Cesium.GeoJsonDataSource.load(proxied(url), {
-      clampToGround: true,
+  function addFeatureLayer(rec) {
+    const color = colorFor(rec);
+    const layer = L.esri.featureLayer({
+      url: rec.url,
+      pointToLayer: (_gj, latlng) => L.circleMarker(latlng, pointStyle(color)),
+      style: () => vectorStyle(color),
+      onEachFeature: bindPopup,
     });
-    styleGeoJson(ds, rec);
-    await viewer.dataSources.add(ds);
-    active.set(rec.id, { record: rec, type: "vector", dataSource: ds });
-    // Prefer flying to the data itself; fall back to the declared bbox.
+    layer.on("requesterror", (e) =>
+      toast(`“${rec.title}”: feature request failed (${e.message || "error"})`, true)
+    );
+    layer.addTo(map);
+    active.set(rec.id, { record: rec, kind: "vector", layer });
+    if (rec.bbox) flyToBbox(rec.bbox);
+  }
+
+  async function addGeoJson(rec) {
+    const res = await fetch(proxied(rec.url), { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const color = colorFor(rec);
+    const layer = L.geoJSON(data, {
+      pointToLayer: (_gj, latlng) => L.circleMarker(latlng, pointStyle(color)),
+      style: () => vectorStyle(color),
+      onEachFeature: bindPopup,
+    }).addTo(map);
+    active.set(rec.id, { record: rec, kind: "vector", layer });
     try {
-      await viewer.flyTo(ds, { duration: 1.2 });
+      map.flyToBounds(layer.getBounds(), { maxZoom: 8, duration: 1.2, padding: [24, 24] });
     } catch (_) {
       if (rec.bbox) flyToBbox(rec.bbox);
     }
@@ -199,8 +237,7 @@
   function removeLayer(id) {
     const entry = active.get(id);
     if (!entry) return;
-    if (entry.type === "imagery") viewer.imageryLayers.remove(entry.layer, true);
-    else if (entry.type === "vector") viewer.dataSources.remove(entry.dataSource, true);
+    map.removeLayer(entry.layer);
     active.delete(id);
     markAdded(id, false);
     renderActive();
@@ -209,22 +246,20 @@
   function flyToActive(id) {
     const entry = active.get(id);
     if (!entry) return;
-    if (entry.type === "vector") viewer.flyTo(entry.dataSource, { duration: 1.2 }).catch(() => {});
-    else if (entry.record.bbox) flyToBbox(entry.record.bbox);
+    if (entry.kind === "vector" && entry.layer.getBounds) {
+      try { map.flyToBounds(entry.layer.getBounds(), { maxZoom: 8, duration: 1.2 }); return; }
+      catch (_) { /* fall through to bbox */ }
+    }
+    if (entry.record.bbox) flyToBbox(entry.record.bbox);
   }
 
   function setOpacity(id, value) {
     const entry = active.get(id);
     if (!entry) return;
-    if (entry.type === "imagery") entry.layer.alpha = value;
-    else if (entry.type === "vector") {
-      entry.dataSource.entities.values.forEach((ent) => {
-        if (ent.point) ent.point.color = ent.point.color.getValue().withAlpha(value);
-        if (ent.polygon) {
-          const c = ent.polygon.material.color.getValue();
-          ent.polygon.material = c.withAlpha(value * 0.5);
-        }
-      });
+    if (entry.kind === "tile") {
+      entry.layer.setOpacity(value);
+    } else if (entry.layer.setStyle) {
+      entry.layer.setStyle({ opacity: value, fillOpacity: value * 0.5 });
     }
   }
 
@@ -333,14 +368,38 @@
   }
 
   function escapeHtml(s) {
-    return String(s || "").replace(/[&<>"']/g, (c) =>
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
     );
   }
 
+  // ----------------------------------------------------- UI: responsive drawer
+  function toggleSidebar(force) {
+    const sb = $("#sidebar");
+    const open = force != null ? force : !sb.classList.contains("open");
+    sb.classList.toggle("open", open);
+    $("#backdrop").classList.toggle("show", open);
+    $("#menu-toggle").setAttribute("aria-expanded", String(open));
+  }
+  function closeSidebarMobile() {
+    if (isMobile()) toggleSidebar(false);
+  }
+
+  function wireUi() {
+    $("#search").addEventListener("input", renderCatalog);
+    $("#live-only").addEventListener("change", renderCatalog);
+    $("#clear-active").addEventListener("click", () => {
+      [...active.keys()].forEach(removeLayer);
+    });
+    $("#menu-toggle").addEventListener("click", () => toggleSidebar());
+    $("#sidebar-close").addEventListener("click", () => toggleSidebar(false));
+    $("#backdrop").addEventListener("click", () => toggleSidebar(false));
+  }
+
   // --------------------------------------------------------------- bootstrap
   async function main() {
-    initViewer();
+    initMap();
+    wireUi();
     try {
       const res = await fetch(CFG.catalogUrl, { cache: "no-cache" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -358,17 +417,11 @@
 
     buildFilters();
     renderCatalog();
-
-    $("#search").addEventListener("input", renderCatalog);
-    $("#live-only").addEventListener("change", renderCatalog);
-    $("#clear-active").addEventListener("click", () => {
-      [...active.keys()].forEach(removeLayer);
-    });
   }
 
   function boot() {
-    if (typeof Cesium === "undefined") {
-      // Cesium.js (deferred) not ready yet; retry shortly.
+    if (typeof L === "undefined" || !L.esri) {
+      // Leaflet / esri-leaflet (deferred) not ready yet; retry shortly.
       return setTimeout(boot, 60);
     }
     main();

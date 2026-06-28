@@ -1,18 +1,19 @@
 # geosteeze
 
-**Compile live geographic data endpoints and explore them on a Cesium globe.**
+**Compile live geographic data endpoints and explore them on an interactive map.**
 
 geosteeze finds geographic data that is served *live* — WMS/WMTS tiles, Esri
 map/feature services, XYZ basemaps, and GeoJSON feeds — and that can be piped
 straight into a web map with **no download step**. A Python scraper discovers
 and validates these endpoints into a normalized `catalog.json`; a zero-build
-[Cesium.js](https://cesium.com/platform/cesiumjs/) front-end lets you browse the
-catalog and drop any layer onto a 3D globe.
+[Leaflet](https://leafletjs.com/) + [esri-leaflet](https://developers.arcgis.com/esri-leaflet/)
+front-end (dark theme, mobile-friendly) lets you browse the catalog and drop any
+layer onto the map.
 
 ```
 ┌─────────────┐     discover + validate      ┌──────────────┐    fetch    ┌───────────┐
-│  catalogs   │ ───────────────────────────► │ catalog.json │ ──────────► │  Cesium   │
-│ ArcGIS/CKAN │     scraper/ (Python)        │  (docs/)     │             │  globe    │
+│  catalogs   │ ───────────────────────────► │ catalog.json │ ──────────► │  Leaflet  │
+│ ArcGIS/CKAN │     scraper/ (Python)        │  (docs/)     │             │  web map  │
 │  + seeds    │                              └──────────────┘             └───────────┘
 └─────────────┘
 ```
@@ -26,23 +27,24 @@ catalog and drop any layer onto a 3D globe.
 pip install -r requirements.txt
 
 # 2. A working catalog of curated seed endpoints already ships in docs/catalog.json.
-#    Serve the front-end and open the globe:
+#    Serve the front-end and open the map:
 python serve.py
 #    → http://localhost:8000
 ```
 
-Click any layer in the sidebar to stream it onto the globe. Use the category
+Click any layer in the sidebar to stream it onto the map. Use the category
 chips and search box to filter, the opacity sliders to blend overlays, and the
-⊕ button to fly to a layer's extent.
+⊕ button to fly to a layer's extent. On phones the sidebar collapses into a
+slide-in drawer (tap ☰) so the map gets the full screen.
 
-> **No Cesium Ion account needed.** The globe runs Ion-free with an
-> OpenStreetMap basemap by default. Add a free token in `docs/config.js`
-> (`cesiumIonToken`) to unlock world terrain and premium imagery.
+> **No account or API key needed.** The map uses a dark
+> [CARTO](https://carto.com/) basemap by default; change `basemapUrl` in
+> `docs/config.js` to any `{z}/{x}/{y}` tile template.
 
 ### Host it as a static site (GitHub Pages)
 
 The front-end is fully static, so you can publish `docs/` straight to GitHub
-Pages and open the globe from any browser (including your phone):
+Pages and open the map from any browser (including your phone):
 
 1. Push this branch to GitHub.
 2. In the repo, go to **Settings → Pages**.
@@ -115,17 +117,20 @@ live, its latency, and whether it sends permissive CORS headers.
 ### Front-end (`docs/`)
 
 A dependency-free single page (`index.html` + `app.js` + `style.css`) that loads
-Cesium from a CDN, fetches `catalog.json`, and maps each endpoint type to the
-right Cesium provider:
+Leaflet + esri-leaflet from a CDN, fetches `catalog.json`, and maps each endpoint
+type to the right Leaflet layer. It's a dark-themed, touch-friendly 2D web map —
+no WebGL globe or 3D Tiles required, since every catalog layer is plain imagery
+or vector that drapes onto the map directly:
 
-| catalog type | Cesium provider |
-|--------------|-----------------|
-| `XYZ` | `UrlTemplateImageryProvider` |
-| `WMS` | `WebMapServiceImageryProvider` |
-| `WMTS` | `WebMapTileServiceImageryProvider` |
-| `ArcGISMapServer` / `ArcGISImageServer` | `ArcGisMapServerImageryProvider` |
-| `ArcGISFeatureServer` | queried as GeoJSON → `GeoJsonDataSource` |
-| `GeoJSON` | `GeoJsonDataSource` |
+| catalog type | Leaflet layer |
+|--------------|---------------|
+| `XYZ` | `L.tileLayer` |
+| `WMS` | `L.tileLayer.wms` |
+| `WMTS` | `L.tileLayer` (KVP `GetTile`; NASA GIBS via its web-mercator REST endpoint) |
+| `ArcGISMapServer` | `L.esri.dynamicMapLayer` |
+| `ArcGISImageServer` | `L.esri.imageMapLayer` |
+| `ArcGISFeatureServer` | `L.esri.featureLayer` |
+| `GeoJSON` | fetched → `L.geoJSON` |
 
 ### Local server + CORS proxy (`serve.py`)
 
@@ -143,11 +148,11 @@ guard; it is a development convenience, not a production gateway.
 
 | key | default | purpose |
 |-----|---------|---------|
-| `cesiumIonToken` | `""` | optional Cesium Ion token (premium terrain/imagery) |
 | `catalogUrl` | `"catalog.json"` | where to load the catalog from |
 | `proxyUrl` | `""` | CORS proxy prefix (`serve.py` sets `/proxy?url=`) |
 | `defaultDate` | `"2023-08-01"` | date for time-aware WMTS (e.g. NASA GIBS daily) |
-| `cesiumVersion` | `"1.119"` | Cesium build loaded from the CDN |
+| `basemapUrl` | CARTO `dark_all` | dark `{z}/{x}/{y}` basemap tile template |
+| `basemapAttribution` | OSM + CARTO | attribution string for the basemap |
 
 ---
 

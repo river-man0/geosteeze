@@ -2,30 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>geosteeze — live geographic data on a globe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1016" />
+  <title>geosteeze — live geographic data on a map</title>
 
   <!-- Config first; runtime-config.js (optional) overrides it when served by serve.py -->
   <script src="config.js"></script>
-  <script>
-    window.CESIUM_BASE_URL =
-      "https://unpkg.com/cesium@" + window.GEOSTEEZE.cesiumVersion + "/Build/Cesium/";
-  </script>
-  <script
-    src="https://unpkg.com/cesium@1.119/Build/Cesium/Cesium.js"
-    defer></script>
+
+  <!-- Leaflet + esri-leaflet: lightweight, mobile-friendly 2D web map. -->
   <link
-    href="https://unpkg.com/cesium@1.119/Build/Cesium/Widgets/widgets.css"
-    rel="stylesheet" />
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    rel="stylesheet"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin="" />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="" defer></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js" defer></script>
+
   <script src="runtime-config.js" defer onerror="/* absent when opened via file:// */"></script>
   <link href="style.css" rel="stylesheet" />
 </head>
 <body>
   <div id="app">
+    <!-- Mobile-only top bar with the drawer toggle. -->
+    <header id="topbar">
+      <button id="menu-toggle" aria-label="Toggle layer list" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <h1 class="topbar-brand">geo<span>steeze</span></h1>
+    </header>
+
+    <div id="backdrop"></div>
+
     <aside id="sidebar">
       <header id="brand">
         <h1>geo<span>steeze</span></h1>
-        <p class="tagline">live geographic data, streamed onto a globe</p>
+        <button id="sidebar-close" aria-label="Close layer list">✕</button>
+        <p class="tagline">live geographic data, streamed onto a map</p>
       </header>
 
       <div id="controls">
@@ -41,8 +56,8 @@
       <ul id="catalog"><!-- layer rows injected here --></ul>
     </aside>
 
-    <main id="map">
-      <div id="cesiumContainer"></div>
+    <main id="map-wrap">
+      <div id="map"></div>
 
       <section id="active-panel" class="hidden">
         <header>
