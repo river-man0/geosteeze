@@ -10,6 +10,10 @@ and validates these endpoints into a normalized `catalog.json`; a zero-build
 front-end (dark theme, mobile-friendly) lets you browse the catalog and drop any
 layer onto the map.
 
+The curated seeds and discovery crawlers are tuned toward **global satellite
+imagery, Arctic sea-ice extent, and Canadian data** (Environment Canada GeoMet,
+NRCan, and the `open.canada.ca` open-data portal).
+
 ```
 ┌─────────────┐     discover + validate      ┌──────────────┐    fetch    ┌───────────┐
 │  catalogs   │ ───────────────────────────► │ catalog.json │ ──────────► │  Leaflet  │
@@ -52,7 +56,8 @@ Pages and open the map from any browser (including your phone):
    pick this branch, and choose the **`/docs`** folder. Save.
 4. Open `https://<owner>.github.io/<repo>/`.
 
-The seed catalog's feeds (USGS earthquakes, NWS alerts, NASA imagery, …) are
+The seed catalog's feeds (NASA GIBS global imagery, Arctic sea-ice
+concentration, Environment Canada GeoMet radar, USGS earthquakes, …) are
 CORS-enabled and stream in directly — no `serve.py` proxy needed. A
 `.nojekyll` file is included so Pages serves the folder as-is.
 
@@ -67,7 +72,7 @@ thousands more, run the crawlers against public catalogs:
 # Validate the seeds only (fast):
 python -m scraper.scrape --sources seed
 
-# Full crawl: seeds + ArcGIS Online + data.gov (CKAN), validated,
+# Full crawl: seeds + ArcGIS Online + open.canada.ca (CKAN), validated,
 # dropping anything that doesn't answer:
 python -m scraper.scrape --sources seed arcgis_online ckan --drop-dead
 
@@ -89,7 +94,7 @@ refresh. Useful flags:
 | `--out PATH` | output path (default `docs/catalog.json`) |
 
 > **Note on network access:** the crawlers reach out to `www.arcgis.com`,
-> `catalog.data.gov`, and the individual services they discover. Run the
+> `open.canada.ca`, and the individual services they discover. Run the
 > scraper from an environment with open outbound HTTPS. (In a locked-down CI
 > sandbox, only `--sources seed --no-validate` will succeed.)
 
@@ -104,7 +109,7 @@ refresh. Useful flags:
 | `models.py` | `Endpoint` dataclass — the normalized record + stable id |
 | `sources/seeds.py` | curated, hand-verified live services |
 | `sources/arcgis_online.py` | crawls the ArcGIS Online content search API by topic |
-| `sources/ckan.py` | crawls a CKAN portal (data.gov) by resource format |
+| `sources/ckan.py` | crawls a CKAN portal (open.canada.ca) by resource format |
 | `sources/ogc.py` | parses WMS/WMTS `GetCapabilities` → per-layer endpoints |
 | `validate.py` | cheap liveness checks (live? latency? CORS?) run concurrently |
 | `scrape.py` | CLI that ties collect → expand → dedupe → validate → write together |

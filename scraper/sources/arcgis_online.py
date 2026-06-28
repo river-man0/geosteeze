@@ -25,18 +25,19 @@ _TYPE_MAP = {
     "WMS": "WMS",
 }
 
-# Topic queries -> category. Keep these broad; the API ranks by relevance.
+# Topic queries -> category. Tuned for the catalog's focus: global imagery,
+# Arctic / sea-ice / cryosphere, and Canadian data. The API ranks by relevance.
 _TOPICS = {
-    "earthquake OR seismic OR hazard": "hazards",
-    "wildfire OR flood OR storm": "hazards",
-    "weather OR precipitation OR temperature": "weather",
-    "satellite OR imagery OR landsat OR sentinel": "imagery",
-    "elevation OR terrain OR bathymetry": "elevation",
-    "boundary OR administrative OR census": "boundaries",
-    "river OR watershed OR hydrology": "environment",
-    "roads OR transportation OR infrastructure": "infrastructure",
-    "ocean OR sea OR coast": "oceans",
-    "air quality OR pollution OR emissions": "environment",
+    "sea ice OR sea-ice OR ice concentration OR ice extent": "oceans",
+    "arctic OR polar OR antarctic": "oceans",
+    "glacier OR permafrost OR snow OR cryosphere": "environment",
+    "satellite OR imagery OR sentinel OR landsat OR mosaic": "imagery",
+    "Canada OR Canadian": "boundaries",
+    "ocean OR bathymetry OR sea surface temperature": "oceans",
+    "climate OR temperature anomaly OR precipitation": "weather",
+    "wildfire OR flood OR earthquake OR hazard": "hazards",
+    "elevation OR terrain OR digital elevation": "elevation",
+    "global OR world OR worldwide": "imagery",
 }
 
 

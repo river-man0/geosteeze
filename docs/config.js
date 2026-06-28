@@ -9,8 +9,10 @@ window.GEOSTEEZE = {
   // Empty string = fetch directly. serve.py sets this to "/proxy?url=".
   proxyUrl: "",
 
-  // Default date for time-aware WMTS layers (e.g. NASA GIBS daily imagery).
-  defaultDate: "2023-08-01",
+  // Default date for time-aware WMTS layers (NASA GIBS daily imagery + sea ice).
+  // Chosen in the Arctic winter so sea-ice concentration shows near-maximum
+  // extent and all daily true-colour products have full coverage.
+  defaultDate: "2024-03-05",
 
   // Dark basemap tile template. CARTO "dark_all" gives a muted, low-glare
   // backdrop that lets data layers read clearly. Swap to any {z}/{x}/{y} URL.
