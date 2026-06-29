@@ -473,6 +473,7 @@
     const sb = $("#sidebar");
     const open = force != null ? force : !sb.classList.contains("open");
     sb.classList.toggle("open", open);
+    if (!open) sb.classList.remove("expanded"); // reset height when closing
     $("#backdrop").classList.toggle("show", open);
     $("#menu-toggle").setAttribute("aria-expanded", String(open));
   }
@@ -483,6 +484,13 @@
     $("#menu-toggle").addEventListener("click", () => toggleSidebar());
     $("#sidebar-close").addEventListener("click", () => toggleSidebar(false));
     $("#backdrop").addEventListener("click", () => toggleSidebar(false));
+    // The grab handle opens the sheet, then toggles between its default and
+    // expanded heights so the map can stay visible while browsing.
+    $("#sheet-grab").addEventListener("click", () => {
+      const sb = $("#sidebar");
+      if (sb.classList.contains("open")) sb.classList.toggle("expanded");
+      else toggleSidebar(true);
+    });
   }
 
   // --------------------------------------------------------------- bootstrap

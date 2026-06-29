@@ -223,18 +223,19 @@ html, body {
 @media (max-width: 760px) {
   #app { flex-direction: column; }
   #topbar { display: flex; }
-  #sidebar-close { display: block; top: 18px; }
 
-  /* Sidebar becomes a bottom sheet so the map stays visible above it. */
+  /* The sidebar becomes a bottom sheet that covers only part of the screen so
+     the map stays visible above it. It opens to a comfortable default height
+     and expands to near-full when the grab handle is tapped. */
   #sidebar {
     position: fixed;
     left: 0; right: 0; bottom: 0;
     top: auto;
     width: 100%;
     min-width: 0;
-    height: 72vh; height: 72dvh;
+    height: 56vh; height: 56dvh;
     transform: translateY(100%);
-    transition: transform 0.25s ease;
+    transition: transform 0.28s ease, height 0.28s ease;
     z-index: 1100;
     border-right: none;
     border-top: 1px solid var(--line);
@@ -243,16 +244,43 @@ html, body {
     padding-bottom: env(safe-area-inset-bottom);
   }
   #sidebar.open { transform: translateY(0); }
+  #sidebar.open.expanded { height: 90vh; height: 90dvh; }
 
+  /* A tall, easy-to-tap grab zone; the visible pill is the ::before. */
   #sheet-grab {
-    display: block;
-    width: 40px; height: 4px;
-    margin: 8px auto 0;
-    border-radius: 999px;
-    background: var(--line);
-    flex: 0 0 auto;
+    display: block; position: relative;
+    height: 26px; cursor: pointer; flex: 0 0 auto;
   }
-  #brand { padding-top: 8px; }
+  #sheet-grab::before {
+    content: "";
+    position: absolute; top: 10px; left: 50%;
+    transform: translateX(-50%);
+    width: 44px; height: 5px;
+    border-radius: 999px; background: var(--line);
+  }
+  #sheet-grab:active::before { background: var(--muted); }
+
+  /* The top bar already shows the brand, so drop the in-sheet header and
+     tighten the controls to leave the most room for the layer list. */
+  #brand { display: none; }
+  #controls { padding: 10px 14px 8px; }
+  #catalog-meta { padding: 8px 14px; }
+
+  /* Category chips scroll sideways instead of stacking into many tall rows. */
+  #filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 10px -14px 4px;
+    padding: 0 14px 2px;
+    scrollbar-width: none;
+  }
+  #filters::-webkit-scrollbar { display: none; }
+  .chip { flex: 0 0 auto; }
+
+  #catalog { padding: 6px 8px; }
+  /* Hide the redundant layer-name so the service URL has room to read. */
+  .layer .endpoint .layer-name { display: none; }
 
   #backdrop {
     display: block;
@@ -273,4 +301,7 @@ html, body {
   /* Larger touch targets on touch devices. */
   .layer .row-main { padding: 13px 11px; }
   .layer-controls .zoom-btn { width: 38px; height: 38px; font-size: 17px; }
+  .layer .endpoint { gap: 10px; }
+  .layer .endpoint .url { font-size: 12px; padding: 5px 0; }
+  .layer .endpoint .copy-url { width: 34px; height: 34px; font-size: 14px; }
 }
