@@ -244,11 +244,13 @@
       else if (rec.type === "ArcGISMapServer" || rec.type === "ArcGISImageServer") await addArcGisLayer(rec);
       else addRaster(rec);
       updateRow(rec.id);
+      updateActiveBar();
       toast(`Added “${rec.title}”.`);
     } catch (err) {
       console.error(err);
       active.delete(rec.id);
       updateRow(rec.id);
+      updateActiveBar();
       toast(`Could not load “${rec.title}”: ${err.message || err}`, true);
     }
   }
@@ -301,6 +303,18 @@
     map.removeLayer(entry.layer);
     active.delete(id);
     updateRow(id);
+    updateActiveBar();
+  }
+
+  function clearAllLayers() {
+    for (const id of [...active.keys()]) removeLayer(id);
+  }
+
+  // Reflect how many layers are on the map in the "N active · Clear all" bar.
+  function updateActiveBar() {
+    const n = active.size;
+    $("#active-count").textContent = n;
+    $("#active-bar").classList.toggle("show", n > 0);
   }
 
   function flyToActive(id) {
@@ -479,8 +493,16 @@
   }
 
   function wireUi() {
-    $("#search").addEventListener("input", renderCatalog);
+    const search = $("#search");
+    const clear = $("#search-clear");
+    const syncClear = () => clear.classList.toggle("visible", search.value.length > 0);
+
+    search.addEventListener("input", () => { syncClear(); renderCatalog(); });
+    clear.addEventListener("click", () => {
+      search.value = ""; syncClear(); renderCatalog(); search.focus();
+    });
     $("#live-only").addEventListener("change", renderCatalog);
+    $("#clear-all").addEventListener("click", clearAllLayers);
     $("#menu-toggle").addEventListener("click", () => toggleSidebar());
     $("#sidebar-close").addEventListener("click", () => toggleSidebar(false));
     $("#backdrop").addEventListener("click", () => toggleSidebar(false));
@@ -490,6 +512,19 @@
       const sb = $("#sidebar");
       if (sb.classList.contains("open")) sb.classList.toggle("expanded");
       else toggleSidebar(true);
+    });
+
+    // Keyboard: "/" focuses search, Esc clears it (or closes the mobile sheet).
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "/" && document.activeElement !== search) {
+        e.preventDefault(); search.focus();
+      } else if (e.key === "Escape") {
+        if (document.activeElement === search && search.value) {
+          search.value = ""; syncClear(); renderCatalog();
+        } else if ($("#sidebar").classList.contains("open")) {
+          toggleSidebar(false);
+        }
+      }
     });
   }
 
@@ -510,7 +545,7 @@
     const s = catalog.stats;
     $("#catalog-meta").innerHTML =
       `<strong>${s.total}</strong> endpoints · <strong>${s.live}</strong> validated live` +
-      (catalog.generated_at ? `<br>generated ${catalog.generated_at.replace("T", " ").replace("+00:00", " UTC")}` : "");
+      (catalog.generated_at ? `<br><span class="gen">updated ${catalog.generated_at.replace("T", " ").replace("+00:00", " UTC")}</span>` : "");
 
     buildFilters();
     renderCatalog();

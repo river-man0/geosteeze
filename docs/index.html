@@ -9,6 +9,8 @@
   <!-- Config first; runtime-config.js (optional) overrides it when served by serve.py -->
   <script src="config.js"></script>
 
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+
   <!-- Leaflet + esri-leaflet: lightweight, mobile-friendly 2D web map. -->
   <link
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -31,7 +33,12 @@
       <button id="menu-toggle" aria-label="Toggle layer list" aria-expanded="false">
         <span></span><span></span><span></span>
       </button>
-      <h1 class="topbar-brand">geo<span>steeze</span></h1>
+      <span class="topbar-brand-row">
+        <svg class="globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
+        </svg>
+        <h1 class="topbar-brand">geo<span>steeze</span></h1>
+      </span>
     </header>
 
     <div id="backdrop"></div>
@@ -39,21 +46,36 @@
     <aside id="sidebar">
       <div id="sheet-grab" aria-hidden="true"></div>
       <header id="brand">
-        <h1>geo<span>steeze</span></h1>
+        <div class="brand-row">
+          <svg class="globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" />
+          </svg>
+          <h1>geo<span>steeze</span></h1>
+        </div>
         <button id="sidebar-close" aria-label="Close layer list">✕</button>
-        <p class="tagline">tap a layer to show it · tap again to hide</p>
+        <p class="tagline">live geographic data · tap a layer to map it</p>
       </header>
 
       <div id="controls">
-        <input id="search" type="search" placeholder="Search layers…" autocomplete="off" />
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+          </svg>
+          <input id="search" type="search" placeholder="Search layers, sources, CRS…" autocomplete="off" />
+          <button id="search-clear" type="button" aria-label="Clear search">✕</button>
+        </div>
         <div id="filters"><!-- category chips injected here --></div>
         <label class="toggle">
           <input type="checkbox" id="live-only" />
-          <span>Show validated (live) only</span>
+          <span>Validated (live) only</span>
         </label>
       </div>
 
       <div id="catalog-meta"></div>
+      <div id="active-bar">
+        <span class="count"><span id="active-count">0</span> layers active</span>
+        <button id="clear-all" type="button">Clear all</button>
+      </div>
       <ul id="catalog"><!-- layer rows injected here --></ul>
     </aside>
 

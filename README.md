@@ -139,7 +139,10 @@ type to the right Leaflet layer. It's a dark-themed, touch-friendly 2D web map â
 no WebGL globe or 3D Tiles required, since every catalog layer is plain imagery
 or vector that drapes onto the map directly. Each row shows the layer's
 projection (`crs` badge) and its endpoint URL (click to open, or copy it), so
-you can see and reach the underlying service at a glance:
+you can see and reach the underlying service at a glance. Niceties: instant
+search (press `/` to focus, `Esc` to clear), category filters, an active-layers
+bar with one-tap **Clear all**, per-layer opacity, and a bottom-sheet layout on
+mobile that keeps the map in view:
 
 | catalog type | Leaflet layer |
 |--------------|---------------|
