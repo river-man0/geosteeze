@@ -23,7 +23,7 @@ CANADA = [-141.0, 41.0, -52.0, 84.0]
 
 
 def get_seed_endpoints() -> List[Endpoint]:
-    return [
+    seeds = [
         # ---------------------------------------------------------- basemaps
         Endpoint(
             title="OpenStreetMap Standard",
@@ -186,3 +186,9 @@ def get_seed_endpoints() -> List[Endpoint]:
             description="Magnitude 2.5+ earthquakes worldwide over the past week.",
         ),
     ]
+    # Record the CRS each seed is drawn in on the Leaflet map. Every raster seed
+    # renders in Web Mercator (XYZ tiles, WMS requested in EPSG:3857, and GIBS
+    # via its epsg3857 REST endpoint); GeoJSON feeds are plotted from WGS84.
+    for ep in seeds:
+        ep.crs = "EPSG:4326" if ep.type == "GeoJSON" else "EPSG:3857"
+    return seeds

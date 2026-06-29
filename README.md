@@ -114,10 +114,22 @@ refresh. Useful flags:
 | `validate.py` | cheap liveness checks (live? latency? CORS?) run concurrently |
 | `scrape.py` | CLI that ties collect → expand → dedupe → validate → write together |
 
-Each endpoint is validated with a check appropriate to its type — an ArcGIS
-`?f=json` descriptor, an OGC `GetCapabilities` document, a sample tile's
-content-type, or the first bytes of a GeoJSON response — recording whether it's
-live, its latency, and whether it sends permissive CORS headers.
+Each endpoint is validated with a check appropriate to its type, recording
+whether it's live, its latency, whether it sends permissive CORS headers, and
+its coordinate reference system (`crs`):
+
+- **WMS** — a real `GetMap` in **EPSG:3857**, the projection the Leaflet map
+  uses. A layer that renders is kept; one that returns a CRS `ServiceException`
+  (it can't serve Web Mercator) is dropped, so the catalog only contains WMS
+  layers that actually line up on the map.
+- **WMTS** — a real `GetTile` for ordinary caches (NASA GIBS is checked via its
+  capabilities and drawn through its dedicated EPSG:3857 REST endpoint). The OGC
+  parser reads each tile-matrix-set's `SupportedCRS` and discards non-Web-
+  Mercator caches (e.g. EPSG:3978 Canada Lambert) that a 2D map can't reproject.
+- **ArcGIS** — the `?f=json` descriptor, capturing the service's native `wkid`.
+  Dynamic services are reprojected server-side; only Web-Mercator tile caches
+  are drawn directly.
+- **XYZ / GeoJSON** — a sample tile's content-type / the first bytes of the feed.
 
 ### Front-end (`docs/`)
 
@@ -125,13 +137,15 @@ A dependency-free single page (`index.html` + `app.js` + `style.css`) that loads
 Leaflet + esri-leaflet from a CDN, fetches `catalog.json`, and maps each endpoint
 type to the right Leaflet layer. It's a dark-themed, touch-friendly 2D web map —
 no WebGL globe or 3D Tiles required, since every catalog layer is plain imagery
-or vector that drapes onto the map directly:
+or vector that drapes onto the map directly. Each row shows the layer's
+projection (`crs` badge) and its endpoint URL (click to open, or copy it), so
+you can see and reach the underlying service at a glance:
 
 | catalog type | Leaflet layer |
 |--------------|---------------|
 | `XYZ` | `L.tileLayer` |
 | `WMS` | `L.tileLayer.wms` |
-| `WMTS` | `L.tileLayer` (KVP `GetTile`; NASA GIBS via its web-mercator REST endpoint) |
+| `WMTS` | `L.tileLayer` (web-mercator KVP `GetTile`; NASA GIBS via its EPSG:3857 REST endpoint) |
 | `ArcGISMapServer` | `L.esri.dynamicMapLayer` |
 | `ArcGISImageServer` | `L.esri.imageMapLayer` |
 | `ArcGISFeatureServer` | `L.esri.featureLayer` |
@@ -155,7 +169,7 @@ guard; it is a development convenience, not a production gateway.
 |-----|---------|---------|
 | `catalogUrl` | `"catalog.json"` | where to load the catalog from |
 | `proxyUrl` | `""` | CORS proxy prefix (`serve.py` sets `/proxy?url=`) |
-| `defaultDate` | `"2023-08-01"` | date for time-aware WMTS (e.g. NASA GIBS daily) |
+| `defaultDate` | `"2024-03-05"` | date for time-aware WMTS (NASA GIBS daily imagery + sea ice) |
 | `basemapUrl` | CARTO `dark_all` | dark `{z}/{x}/{y}` basemap tile template |
 | `basemapAttribution` | OSM + CARTO | attribution string for the basemap |
 
@@ -177,6 +191,7 @@ guard; it is a development convenience, not a production gateway.
       "category": "hazards",
       "layer": null,
       "bbox": [-180, -85, 180, 85],
+      "crs": "EPSG:4326",
       "attribution": "USGS Earthquake Hazards Program",
       "live": true, "cors": true, "latency_ms": 142,
       "checked_at": "2026-06-27T03:20:39+00:00"

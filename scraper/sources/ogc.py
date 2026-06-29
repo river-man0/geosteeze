@@ -17,6 +17,29 @@ from ..models import Endpoint
 
 USER_AGENT = "geosteeze-scraper/0.1 (+https://github.com/river-man0/geosteeze)"
 
+# A Leaflet map is single-CRS (EPSG:3857). Only sources whose tiles/maps are
+# available in Web Mercator can be drawn on it without client-side reprojection.
+WEB_MERCATOR_EPSG = {3857, 900913, 102100, 102113}
+
+
+def _epsg_code(crs: str) -> Optional[int]:
+    """Pull the numeric EPSG code out of a CRS string or URN.
+
+    Handles 'EPSG:3857', 'urn:ogc:def:crs:EPSG::3857',
+    'urn:ogc:def:crs:EPSG:6.18:3857' and bare 'CRS:84'.
+    """
+    if not crs:
+        return None
+    s = crs.strip().upper().replace("CRS:84", "EPSG:4326")
+    if "EPSG" not in s:
+        return None
+    tail = s.rsplit(":", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def _is_web_mercator(codes) -> bool:
+    return any(c in WEB_MERCATOR_EPSG for c in codes if c is not None)
+
 
 def _localname(tag: str) -> str:
     """Strip the XML namespace from a tag, e.g. '{...wms}Layer' -> 'Layer'."""
@@ -49,17 +72,28 @@ def _fetch_caps(url: str, service: str, timeout: float) -> ET.Element:
 # --------------------------------------------------------------------------- WMS
 
 
-def _wms_layers(layer_el: ET.Element) -> List[ET.Element]:
-    """Recursively collect named (renderable) WMS layers."""
-    out: List[ET.Element] = []
+def _wms_layers(layer_el: ET.Element, inherited_crs=frozenset()):
+    """Recursively collect named (renderable) WMS layers with their CRS set.
+
+    In WMS a layer inherits every CRS/SRS advertised by its ancestors, so we
+    accumulate them on the way down. Returns ``(layer_el, crs_codes)`` tuples.
+    """
+    own = set(inherited_crs)
+    for tag in ("CRS", "SRS"):
+        for c in _direct_children(layer_el, tag):
+            for token in _text(c).split():
+                code = _epsg_code(token)
+                if code is not None:
+                    own.add(code)
+    out = []
     name = None
     for c in _direct_children(layer_el, "Name"):
         name = _text(c)
         break
     if name:
-        out.append(layer_el)
+        out.append((layer_el, frozenset(own)))
     for sub in _direct_children(layer_el, "Layer"):
-        out.extend(_wms_layers(sub))
+        out.extend(_wms_layers(sub, own))
     return out
 
 
@@ -94,15 +128,22 @@ def expand_wms(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> L
     if cap is None:
         return []
     top = _direct_children(cap, "Layer")
-    candidates: List[ET.Element] = []
+    candidates = []
     for t in top:
         candidates.extend(_wms_layers(t))
 
     out: List[Endpoint] = []
-    for layer_el in candidates[:max_layers]:
+    for layer_el, crs_codes in candidates:
+        if len(out) >= max_layers:
+            break
         name = _text(_find(layer_el, "Name"))
         if not name:
             continue
+        # We can't decide WMS renderability from the advertised CRS list alone:
+        # ArcGIS/MapServer WMS routinely reproject to EPSG:3857 on request even
+        # when they only advertise EPSG:4326/3978. The viewer requests 3857, so
+        # tag the layer as such and let the GetMap render check in validate.py
+        # drop the ones that genuinely refuse Web Mercator.
         title = _text(_find(layer_el, "Title")) or name
         out.append(Endpoint(
             title=title,
@@ -114,6 +155,7 @@ def expand_wms(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> L
             description=_text(_find(layer_el, "Abstract"))[:400],
             attribution=root.attribution,
             bbox=_wms_bbox(layer_el),
+            crs="EPSG:3857",
         ))
     return out
 
@@ -121,14 +163,28 @@ def expand_wms(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> L
 # -------------------------------------------------------------------------- WMTS
 
 
+def _wmts_matrixset_crs(contents: ET.Element) -> dict:
+    """Map every TileMatrixSet identifier to its EPSG code (from SupportedCRS)."""
+    out = {}
+    for tms_el in _direct_children(contents, "TileMatrixSet"):
+        ident = _text(_find(tms_el, "Identifier"))
+        crs = _text(_find(tms_el, "SupportedCRS"))
+        if ident:
+            out[ident] = _epsg_code(crs)
+    return out
+
+
 def expand_wmts(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> List[Endpoint]:
     tree = _fetch_caps(root.url, "WMTS", timeout)
     contents = _find(tree, "Contents")
     if contents is None:
         return []
+    tms_crs = _wmts_matrixset_crs(contents)
 
     out: List[Endpoint] = []
-    for layer_el in _direct_children(contents, "Layer")[:max_layers]:
+    for layer_el in _direct_children(contents, "Layer"):
+        if len(out) >= max_layers:
+            break
         ident = _text(_find(layer_el, "Identifier"))
         if not ident:
             continue
@@ -158,7 +214,19 @@ def expand_wmts(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> 
                 bbox = None
         has_time = any(_localname(d.tag) == "Dimension" for d in layer_el)
 
-        scheme = "geographic" if "4326" in tms or "epsg4326" in root.url.lower() else "web-mercator"
+        # Resolve the tile-matrix-set's real CRS. The viewer draws WMTS tiles
+        # straight onto a Web-Mercator map, so a non-3857 cache (e.g. EPSG:3978
+        # Canada Lambert, or a geographic EPSG:4326 grid) would misalign — skip
+        # it. Fall back to a string heuristic when SupportedCRS is missing.
+        code = tms_crs.get(tms)
+        if code is None:
+            blob = (tms + " " + root.url).lower()
+            if any(str(c) in blob for c in WEB_MERCATOR_EPSG) or "google" in blob:
+                code = 3857
+            elif "4326" in blob:
+                code = 4326
+        if not _is_web_mercator([code]):
+            continue
         out.append(Endpoint(
             title=_text(_find(layer_el, "Title")) or ident,
             type="WMTS",
@@ -171,7 +239,8 @@ def expand_wmts(root: Endpoint, timeout: float = 20.0, max_layers: int = 40) -> 
             tile_matrix_set=tms,
             tile_format=fmt or "image/png",
             style=style,
-            tiling_scheme=scheme,
+            tiling_scheme="web-mercator",
+            crs="EPSG:3857",
             time_dimension=has_time,
         ))
     return out

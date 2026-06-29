@@ -28,6 +28,17 @@
   function colorFor(rec) {
     return CATEGORY_COLORS[rec.category] || CATEGORY_COLORS.other;
   }
+  // Compact "host + path" form of an endpoint URL for display in a row.
+  function shortUrl(url) {
+    try {
+      const u = new URL(url);
+      let path = decodeURIComponent(u.pathname).replace(/\/$/, "");
+      if (path.length > 38) path = path.slice(0, 18) + "…" + path.slice(-18);
+      return u.host + path;
+    } catch (_) {
+      return url.length > 56 ? url.slice(0, 55) + "…" : url;
+    }
+  }
   function isMercator(wkid) {
     return [3857, 102100, 102113, 900913].includes(Number(wkid));
   }
@@ -119,6 +130,14 @@
         opacity, maxNativeZoom: level, maxZoom: 22,
         attribution: rec.attribution || "NASA GIBS", crossOrigin: true,
       });
+    }
+
+    // The generic path draws tiles directly onto the Web-Mercator map, so a
+    // non-3857 matrix set (geographic or a regional projection) would misalign.
+    if (rec.tiling_scheme && rec.tiling_scheme !== "web-mercator") {
+      throw new Error(
+        `WMTS cache is ${rec.crs || rec.tiling_scheme}; can't reproject on a 2D web map`
+      );
     }
 
     const sep = rec.url.includes("?") ? "&" : "?";
@@ -335,8 +354,15 @@
         <div class="meta">
           <span class="badge type">${rec.type}</span>
           <span class="badge">${rec.category}</span>
+          ${rec.crs ? `<span class="badge crs" title="projection drawn on the map">${escapeHtml(rec.crs)}</span>` : ""}
           ${rec.cors === false ? '<span class="badge" title="server may block browser fetches">no-CORS</span>' : ""}
           ${rec.latency_ms != null ? `<span class="badge">${rec.latency_ms} ms</span>` : ""}
+        </div>
+        <div class="endpoint">
+          <a class="url" href="${escapeHtml(rec.url)}" target="_blank" rel="noopener noreferrer"
+             title="${escapeHtml(rec.url)}">${escapeHtml(shortUrl(rec.url))}</a>
+          ${rec.layer ? `<span class="layer-name" title="layer / identifier">${escapeHtml(rec.layer)}</span>` : ""}
+          <button type="button" class="copy-url" title="Copy endpoint URL" aria-label="Copy endpoint URL">⧉</button>
         </div>
       </div>${controls}`;
   }
@@ -351,6 +377,24 @@
     const zoom = li.querySelector(".zoom-btn");
     if (zoom) {
       zoom.addEventListener("click", (e) => { e.stopPropagation(); flyToActive(rec.id); });
+    }
+    // The endpoint link/copy control must not toggle the layer.
+    const link = li.querySelector(".url");
+    if (link) link.addEventListener("click", (e) => e.stopPropagation());
+    const copy = li.querySelector(".copy-url");
+    if (copy) {
+      copy.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const done = () => toast("Endpoint URL copied.");
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(rec.url).then(done, () => toast("Copy failed.", true));
+        } else {
+          const ta = document.createElement("textarea");
+          ta.value = rec.url; document.body.appendChild(ta); ta.select();
+          try { document.execCommand("copy"); done(); } catch (_) { toast("Copy failed.", true); }
+          document.body.removeChild(ta);
+        }
+      });
     }
   }
 
@@ -373,7 +417,7 @@
       if (liveOnly && !rec.live) return false;
       if (cats.size && !cats.has(rec.category)) return false;
       if (q) {
-        const hay = `${rec.title} ${rec.description} ${rec.category} ${rec.type} ${rec.attribution}`.toLowerCase();
+        const hay = `${rec.title} ${rec.description} ${rec.category} ${rec.type} ${rec.attribution} ${rec.url} ${rec.layer || ""} ${rec.crs || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;

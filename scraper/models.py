@@ -54,6 +54,11 @@ class Endpoint:
     tiling_scheme: Optional[str] = None  # "geographic" | "web-mercator"
     time_dimension: bool = False         # endpoint expects a TIME parameter
 
+    # Native/source coordinate reference system, e.g. "EPSG:3857". Used both to
+    # tell the viewer whether a layer can be drawn on its Web-Mercator map and
+    # to surface the projection in the UI. None = unknown / not applicable.
+    crs: Optional[str] = None
+
     # Validation results (filled in by validate.py)
     live: bool = False
     cors: Optional[bool] = None
